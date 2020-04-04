@@ -20,19 +20,20 @@
 
 #pragma once
 
-#include <stdbool.h>
-#include <stdint.h>
+#include "rx/rx_spi.h"
 
-typedef struct flySkyConfig_s {
-    uint32_t txId;
-    uint8_t rfChannelMap[16];
-    rx_spi_protocol_e protocol;
-} flySkyConfig_t;
+#define INTERVAL_RX_LOSS_MS 1000
+#define INTERVAL_RX_BIND_MS 250
+#define RX_LOSS_COUNT 1000
 
-PG_DECLARE(flySkyConfig_t, flySkyConfig);
+void rxSpiCommonIOInit(const rxSpiConfig_t *rxSpiConfig);
 
-struct rxSpiConfig_s;
-struct rxRuntimeConfig_s;
-bool flySkyInit(const struct rxSpiConfig_s *rxConfig, struct rxRuntimeConfig_s *rxRuntimeConfig);
-void flySkySetRcDataFromPayload(uint16_t *rcData, const uint8_t *payload);
-rx_spi_received_e flySkyDataReceived(uint8_t *payload);
+void rxSpiLedOn(void);
+void rxSpiLedOff(void);
+void rxSpiLedToggle(void);
+void rxSpiLedBlink(timeMs_t blinkMs);
+void rxSpiLedBlinkRxLoss(rx_spi_received_e result);
+void rxSpiLedBlinkBind(void);
+
+void rxSpiBind(void);
+bool rxSpiCheckBindRequested(bool reset);

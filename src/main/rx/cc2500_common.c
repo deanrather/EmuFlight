@@ -26,32 +26,30 @@
 
 #include "common/maths.h"
 
+#include "drivers/io.h"
+#include "drivers/rx/rx_cc2500.h"
+#include "drivers/rx/rx_spi.h"
+#include "drivers/time.h"
+
+#include "config/config.h"
+
 #include "pg/pg.h"
 #include "pg/pg_ids.h"
 #include "pg/rx.h"
 #include "pg/rx_spi.h"
-
-#include "drivers/rx/rx_cc2500.h"
-#include "drivers/io.h"
-#include "drivers/time.h"
-
-#include "fc/config.h"
+#include "pg/rx_spi_cc2500.h"
 
 #include "rx/rx.h"
 #include "rx/rx_spi.h"
 
-#include "rx/cc2500_common.h"
+#include "cc2500_common.h"
 
-static IO_t gdoPin;
-static IO_t bindPin = DEFIO_IO(NONE);
-static IO_t cc2500LedPin;
-static bool bindRequested;
-
-static bool lastBindPinStatus;
 #if defined(USE_RX_CC2500_SPI_PA_LNA)
 static IO_t txEnPin;
 static IO_t rxLnaEnPin;
+#if defined(USE_RX_CC2500_SPI_DIVERSITY)
 static IO_t antSelPin;
+#endif
 #endif
 static int16_t rssiDbm;
 
@@ -71,97 +69,36 @@ void cc2500setRssiDbm(uint8_t value)
     setRssi(rssiDbm << 3, RSSI_SOURCE_RX_PROTOCOL);
 }
 
-void cc2500SpiBind(void)
-{
-    bindRequested = true;
-}
-
-bool cc2500checkBindRequested(bool reset)
-{
-    if (bindPin) {
-        bool bindPinStatus = IORead(bindPin);
-        if (lastBindPinStatus && !bindPinStatus) {
-            bindRequested = true;
-        }
-        lastBindPinStatus = bindPinStatus;
-    }
-
-    if (!bindRequested) {
-        return false;
-    } else {
-        if (reset) {
-            bindRequested = false;
-        }
-
-        return true;
-    }
-}
-
-bool cc2500getGdo(void)
-{
-    return IORead(gdoPin);
-}
-
 #if defined(USE_RX_CC2500_SPI_PA_LNA) && defined(USE_RX_CC2500_SPI_DIVERSITY)
 void cc2500switchAntennae(void)
 {
     static bool alternativeAntennaSelected = true;
 
-    if (alternativeAntennaSelected) {
-        IOLo(antSelPin);
-    } else {
-        IOHi(antSelPin);
+    if (antSelPin) {
+        if (alternativeAntennaSelected) {
+            IOLo(antSelPin);
+        } else {
+            IOHi(antSelPin);
+        }
+        alternativeAntennaSelected = !alternativeAntennaSelected;
     }
-    alternativeAntennaSelected = !alternativeAntennaSelected;
 }
 #endif
 #if defined(USE_RX_CC2500_SPI_PA_LNA)
 void cc2500TxEnable(void)
 {
-    IOHi(txEnPin);
+    if (txEnPin) {
+        IOHi(txEnPin);
+    }
 }
 
 void cc2500TxDisable(void)
 {
-    IOLo(txEnPin);
-}
-#endif
-
-void cc2500LedOn(void)
-{
-#if defined(RX_CC2500_SPI_LED_PIN_INVERTED)
-    IOLo(cc2500LedPin);
-#else
-    IOHi(cc2500LedPin);
-#endif
-}
-
-void cc2500LedOff(void)
-{
-#if defined(RX_CC2500_SPI_LED_PIN_INVERTED)
-    IOHi(cc2500LedPin);
-#else
-    IOLo(cc2500LedPin);
-#endif
-}
-
-void cc2500LedBlink(timeMs_t blinkms)
-{
-    static bool ledIsOn = true;
-    static timeMs_t ledBlinkMs = 0;
-
-    if ( (ledBlinkMs + blinkms) > millis() ) {
-        return;
+    if (txEnPin) {
+        IOLo(txEnPin);
     }
-    ledBlinkMs = millis();
-
-    if (ledIsOn) {
-        cc2500LedOff();
-    } else {
-        cc2500LedOn();
-    }
-    ledIsOn = !ledIsOn;
 }
+#endif
 
 static bool cc2500SpiDetect(void)
 {
@@ -176,54 +113,59 @@ static bool cc2500SpiDetect(void)
 
 bool cc2500SpiInit(void)
 {
-#if !defined(RX_CC2500_SPI_DISABLE_CHIP_DETECTION)
-    if (!cc2500SpiDetect()) {
+    if (rxCc2500SpiConfig()->chipDetectEnabled && !cc2500SpiDetect()) {
         return false;
     }
-#else
-    UNUSED(cc2500SpiDetect);
+
+    if (!rxSpiExtiConfigured()) {
+        return false;
+    }
+
+#if defined(USE_RX_CC2500_SPI_PA_LNA)
+    if (rxCc2500SpiConfig()->lnaEnIoTag) {
+        rxLnaEnPin = IOGetByTag(rxCc2500SpiConfig()->lnaEnIoTag);
+        IOInit(rxLnaEnPin, OWNER_RX_SPI_CC2500_LNA_EN, 0);
+        IOConfigGPIO(rxLnaEnPin, IOCFG_OUT_PP);
+
+        IOHi(rxLnaEnPin); // always on at the moment
+    }
+    if (rxCc2500SpiConfig()->txEnIoTag) {
+        txEnPin = IOGetByTag(rxCc2500SpiConfig()->txEnIoTag);
+        IOInit(txEnPin, OWNER_RX_SPI_CC2500_TX_EN, 0);
+        IOConfigGPIO(txEnPin, IOCFG_OUT_PP);
+    } else {
+        txEnPin = IO_NONE;
+    }
+#if defined(USE_RX_CC2500_SPI_DIVERSITY)
+    if (rxCc2500SpiConfig()->antSelIoTag) {
+        antSelPin = IOGetByTag(rxCc2500SpiConfig()->antSelIoTag);
+        IOInit(antSelPin, OWNER_RX_SPI_CC2500_ANT_SEL, 0);
+        IOConfigGPIO(antSelPin, IOCFG_OUT_PP);
+
+        IOHi(antSelPin);
+    } else {
+        antSelPin = IO_NONE;
+    }
 #endif
+#endif // USE_RX_CC2500_SPI_PA_LNA
+
+#if defined(USE_RX_CC2500_SPI_PA_LNA)
+    cc2500TxDisable();
+#endif // USE_RX_CC2500_SPI_PA_LNA
 
     if (rssiSource == RSSI_SOURCE_NONE) {
         rssiSource = RSSI_SOURCE_RX_PROTOCOL;
     }
 
-    // gpio init here
-    gdoPin = IOGetByTag(IO_TAG(RX_CC2500_SPI_GDO_0_PIN));
-    IOInit(gdoPin, OWNER_RX_SPI, 0);
-    IOConfigGPIO(gdoPin, IOCFG_IN_FLOATING);
-    cc2500LedPin = IOGetByTag(IO_TAG(RX_CC2500_SPI_LED_PIN));
-    IOInit(cc2500LedPin, OWNER_LED, 0);
-    IOConfigGPIO(cc2500LedPin, IOCFG_OUT_PP);
-#if defined(USE_RX_CC2500_SPI_PA_LNA)
-    rxLnaEnPin = IOGetByTag(IO_TAG(RX_CC2500_SPI_LNA_EN_PIN));
-    IOInit(rxLnaEnPin, OWNER_RX_SPI, 0);
-    IOConfigGPIO(rxLnaEnPin, IOCFG_OUT_PP);
-    IOHi(rxLnaEnPin); // always on at the moment
-    txEnPin = IOGetByTag(IO_TAG(RX_CC2500_SPI_TX_EN_PIN));
-    IOInit(txEnPin, OWNER_RX_SPI, 0);
-    IOConfigGPIO(txEnPin, IOCFG_OUT_PP);
-#if defined(USE_RX_CC2500_SPI_DIVERSITY)
-    antSelPin = IOGetByTag(IO_TAG(RX_CC2500_SPI_ANT_SEL_PIN));
-    IOInit(antSelPin, OWNER_RX_SPI, 0);
-    IOConfigGPIO(antSelPin, IOCFG_OUT_PP);
-#endif
-#endif // USE_RX_CC2500_SPI_PA_LNA
-#if defined(BINDPLUG_PIN)
-    bindPin = IOGetByTag(IO_TAG(BINDPLUG_PIN));
-    IOInit(bindPin, OWNER_RX_BIND, 0);
-    IOConfigGPIO(bindPin, IOCFG_IPU);
-
-    lastBindPinStatus = IORead(bindPin);
-#endif
-
-#if defined(USE_RX_CC2500_SPI_PA_LNA)
-#if defined(USE_RX_CC2500_SPI_DIVERSITY)
-    IOHi(antSelPin);
-#endif
-    cc2500TxDisable();
-#endif // USE_RX_CC2500_SPI_PA_LNA
-
     return true;
 }
 #endif
+
+void cc2500ApplyRegisterConfig(const cc2500RegisterConfigElement_t *configArrayPtr, int configSize)
+{
+    const int entryCount = configSize / sizeof(cc2500RegisterConfigElement_t);
+    for (int i = 0; i < entryCount; i++) {
+        cc2500WriteReg(configArrayPtr->registerID, configArrayPtr->registerValue);
+        configArrayPtr++;
+    }
+}

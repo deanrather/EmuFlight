@@ -20,5 +20,20 @@
 
 #pragma once
 
-// Function to be implemented on a per-target basis under src/main/target/<TARGET>/serialrx.c
-bool targetCustomSerialRxInit(const rxConfig_t *rxConfig, rxRuntimeState_t *rxRuntimeState);
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "rx/rx_spi.h"
+
+typedef struct flySkyConfig_s {
+    uint32_t txId;
+    uint8_t rfChannelMap[16];
+} flySkyConfig_t;
+
+PG_DECLARE(flySkyConfig_t, flySkyConfig);
+
+struct rxSpiConfig_s;
+struct rxRuntimeState_s;
+bool flySkyInit(const struct rxSpiConfig_s *rxConfig, struct rxRuntimeState_s *rxRuntimeState, rxSpiExtiConfig_t *extiConfig);
+void flySkySetRcDataFromPayload(uint16_t *rcData, const uint8_t *payload);
+rx_spi_received_e flySkyDataReceived(uint8_t *payload);
