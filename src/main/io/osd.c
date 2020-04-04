@@ -608,7 +608,7 @@ static bool osdDrawSingleElement(uint8_t item)
             } else if (FLIGHT_MODE(HEADFREE_MODE)) {
                 strcpy(buff, "HEAD");
             } else if (FLIGHT_MODE(ANGLE_MODE)) {
-                strcpy(buff, "STAB");
+                strcpy(buff, "ANGL");
             } else if (FLIGHT_MODE(HORIZON_MODE)) {
                 strcpy(buff, "HOR ");
             } else if (isAirmodeActive()) {
